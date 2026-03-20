@@ -52,7 +52,7 @@ app.post('/api/pacientes', async (req, res) => {
 });
 
 // 🔹 Endpoint GET (Estadísticas)
-app.get('/estadisticas/pacientes', async (req, res) => {
+app.get('/api/estadisticas/pacientes', async (req, res) => {
   try {
     const pool = await getConnection();
     if (!pool) return res.status(500).json({ error: 'Error conexión BD' });
