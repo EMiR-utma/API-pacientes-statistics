@@ -1,12 +1,14 @@
+require('dotenv').config();
 const sql = require('mssql');
 
 const config = {
-  server: 'localhost',
-  port: 1433,
-  database: 'pacientes_api',
-  user: 'api_user', // si usas Windows Auth, déjalo vacío
-  password: 'ApiUser123!',
+  server: process.env.DB_SERVER,
+  port: parseInt(process.env.DB_PORT),
+  database: process.env.DB_DATABASE,
+  user: process.env.DB_USER, // si usas Windows Auth, déjalo vacío
+  password: process.env.DB_PASSWORD,
   options: {
+    encrypt: true,
     trustServerCertificate: true
   }
 };
