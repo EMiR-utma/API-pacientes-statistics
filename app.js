@@ -22,11 +22,15 @@ app.post('/api/pacientes', async (req, res) => {
       [p.ownerId]
     );
 
+    console.log("UID recibido:", p.ownerId);
+    console.log("Filas encontradas:", userResult.rows.length);
+
     if (userResult.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado en Aiven' });
     }
 
     const userIdNumerico = userResult.rows[0].id;
+    console.log("ID numérico encontrado:", userIdNumerico);
 
     // 2. Insertamos el paciente (Sintaxis Postgres)
     const insertQuery = `
