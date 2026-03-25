@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { getConnection } = require('./db');
-const sql = require('mssql');
+const { pool } = require('./db'); // Importamos el pool que definimos en db.js
 
 const app = express();
 app.use(cors());
@@ -9,69 +8,64 @@ app.use(express.json());
 
 // 🔹 Ruta base
 app.get('/', (req, res) => {
-  res.send('API funcionando');
+  res.send('API funcionando en Aiven Cloud');
 });
 
 // 🔹 Endpoint POST (Guardar)
 app.post('/api/pacientes', async (req, res) => {
   try {
     const p = req.body;
-    const pool = await getConnection();
 
-    if (!pool) return res.status(500).json({ error: 'Error conexión BD' });
+    // 1. Buscamos el ID del usuario usando el firebase_uid (Postgres usa $1 para parámetros)
+    const userResult = await pool.query(
+      'SELECT id FROM usuarios WHERE uid_firebase = $1', 
+      [p.ownerId]
+    );
 
-    // 1. Buscamos el ID numérico del usuario usando el firebase_uid que viene de Angular
-    const userResult = await pool.request()
-      .input('firebaseUid', sql.VarChar, p.ownerId)
-      .query('SELECT id FROM usuarios WHERE firebase_uid = @firebaseUid');
-
-    if (userResult.recordset.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado en SQL Server' });
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado en Aiven' });
     }
 
-    const userIdNumerico = userResult.recordset[0].id;
+    const userIdNumerico = userResult.rows[0].id;
 
-    // 2. Insertamos el paciente con los nombres de columna exactos de tu captura
-    await pool.request()
-      .input('nombre', sql.VarChar, p.nombre)
-      .input('apellidos', sql.VarChar, p.apellidos)
-      .input('fechaNac', sql.Date, p.fechaNacimiento)
-      .input('correo', sql.VarChar, p.correoElectronico)
-      .input('domicilio', sql.VarChar, p.domicilio)
-      .input('usuarioId', sql.Int, userIdNumerico) // Usamos el ID numérico (1, 2, etc.)
-      .query(`
-        INSERT INTO pacientes (nombre, apellidos, fecha_nacimiento, correo_electronico, domicilio, usuario_id)
-        VALUES (@nombre, @apellidos, @fechaNac, @correo, @domicilio, @usuarioId)
-      `);
+    // 2. Insertamos el paciente (Sintaxis Postgres)
+    const insertQuery = `
+      INSERT INTO pacientes (nombre, apellidos, fecha_nacimiento, correo_electronico, domicilio, usuario_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `;
+    const values = [p.nombre, p.apellidos, p.fechaNacimiento, p.correoElectronico, p.domicilio, userIdNumerico];
 
-    res.status(201).json({ message: 'Paciente guardado en SQL Server' });
+    await pool.query(insertQuery, values);
+
+    res.status(201).json({ message: 'Paciente guardado exitosamente en la nube' });
   } catch (error) {
     console.error('Error al insertar:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    res.status(500).json({ error: 'Error interno en Aiven' });
   }
 });
 
 // 🔹 Endpoint GET (Estadísticas)
 app.get('/api/estadisticas/pacientes', async (req, res) => {
   try {
-    const pool = await getConnection();
-    if (!pool) return res.status(500).json({ error: 'Error conexión BD' });
-
-    const result = await pool.request().query(`
+    // Postgres usa EXTRACT y AGE para calcular edades
+    const query = `
       SELECT 
         COUNT(*) AS total_pacientes,
-        AVG(DATEDIFF(YEAR, fecha_nacimiento, GETDATE())) AS edad_promedio
+        ROUND(AVG(EXTRACT(YEAR FROM AGE(NOW(), fecha_nacimiento)))::numeric, 1) AS edad_promedio
       FROM pacientes;
-    `);
+    `;
+    
+    const result = await pool.query(query);
 
-    res.json(result.recordset[0]);
+    // En pg, los resultados vienen en .rows
+    res.json(result.rows[0]);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error en el servidor' });
+    console.error('Error en estadísticas:', error);
+    res.status(500).json({ error: 'Error en el servidor de Aiven' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT} conectado a Aiven`);
 });
