@@ -1,66 +1,86 @@
 const express = require('express');
+const admin = require('firebase-admin');
+const serviceAccount = require('./serviceAccountKey.json'); 
 const cors = require('cors');
-const { pool } = require('./db'); // Importamos el pool desde db.js
+const { pool } = require('./db'); 
+
+//  Here we initialize our firebase admin credential, which allow us to interact with Firebase services.
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const dbFirebase = admin.firestore();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔹 Ruta base para verificar que el servidor vive
+// This is a simple test endpoint to verify that the server is running and can respond to requests.
 app.get('/', (req, res) => {
-  res.send('API de Pacientes funcionando en Aiven Cloud');
+  res.send('API de Pacientes funcionando en Aiven Cloud y sincronizada con Firebase');
 });
 
-// 🔹 Endpoint POST (Guardar Paciente)
+// This is the endpoint POST it saves patients in PostgreSQL and Firebase database, both are in sync.
 app.post('/api/pacientes', async (req, res) => {
   try {
     const p = req.body;
     
-    // Log para depurar qué está enviando Angular exactamente
-    console.log("--- Nueva petición de guardado ---");
+    console.log("Nueva petición de guardado de paciente:");
     console.log("Datos recibidos:", p);
 
-    // 1. Buscamos el ID numérico del usuario usando su UID de Firebase
+    // First we find the user in PostgreSQL using the Firebase UID (ownerId) to get the corresponding numeric user ID.
     const userResult = await pool.query(
       'SELECT id FROM usuarios WHERE uid_firebase = $1', 
       [p.ownerId]
     );
 
-    // Si no encontramos al usuario, detenemos el proceso
     if (userResult.rows.length === 0) {
       console.error("ERROR: No existe usuario en DB con UID:", p.ownerId);
-      return res.status(404).json({ error: 'Usuario no encontrado en la base de datos' });
+      return res.status(404).json({ error: 'Usuario no encontrado en la base de datos de Firebase' });
     }
 
     const userIdNumerico = userResult.rows[0].id;
-    console.log("Usuario identificado. ID numérico:", userIdNumerico);
 
-    // 2. Mapeo flexible de variables
-    // Esto asegura que si Angular manda 'fechaNacimiento' o 'fecha_nacimiento', el valor se capture.
+    // Here we extract the data from the form, we cover different possible field names to be flexible with the frontend used.
     const nombre = p.nombre;
     const apellidos = p.apellidos;
     const fecha = p.fechaNacimiento || p.fecha_nacimiento; 
     const email = p.correoElectronico || p.correo_electronico || p.correo;
     const domicilio = p.domicilio;
 
-    // 3. Inserción en la tabla 'pacientes'
+    // This part is the insertion in PostgreSQL, we use parameterized queries to prevent SQL injection and ensure data integrity.
     const insertQuery = `
       INSERT INTO pacientes (nombre, apellidos, fecha_nacimiento, correo_electronico, domicilio, usuario_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
     `;
     
     const values = [nombre, apellidos, fecha, email, domicilio, userIdNumerico];
-
-    await pool.query(insertQuery, values);
+    const pgRes = await pool.query(insertQuery, values);
+    const newIdPostgres = pgRes.rows[0].id;
     
-    console.log("✅ Paciente guardado correctamente para el usuario:", userIdNumerico);
-    res.status(201).json({ message: 'Paciente guardado exitosamente en la nube' });
+    console.log("✅ Guardado en Postgres. ID:", newIdPostgres);
+
+    // This will insert the same patient data into Firebase DB, including the reference to the PostgreSQL ID for cross-referencing.
+    await dbFirebase.collection('pacientes').add({
+      nombre: nombre,
+      apellidos: apellidos,
+      fechaNacimiento: fecha,
+      correoElectronico: email,
+      domicilio: domicilio,
+      ownerId: p.ownerId, 
+      postgresId: newIdPostgres,
+      fechaRegistro: new Date().toISOString()
+    });
+
+    console.log("✅ Sincronizado con Firebase Firestore");
+    
+    res.status(201).json({ 
+      message: 'Paciente guardado y sincronizado exitosamente',
+      idPostgres: newIdPostgres 
+    });
 
   } catch (error) {
-    // Si hay un error, lo imprimimos completo en Render para debuguear
-    console.error('❌ Error detallado al insertar:', error.message);
-    
-    // Enviamos el mensaje de error real a Angular para verlo en la consola del navegador
+    console.error('❌ Error en el proceso de guardado:', error.message);
     res.status(500).json({ 
       error: 'Error interno en el servidor',
       details: error.message 
@@ -68,10 +88,9 @@ app.post('/api/pacientes', async (req, res) => {
   }
 });
 
-// 🔹 Endpoint GET (Estadísticas)
+// Endpoint GET of our API that provides statistics of patients, in this case total of patients and average age.
 app.get('/api/estadisticas/pacientes', async (req, res) => {
   try {
-    // Cálculo de estadísticas usando funciones nativas de PostgreSQL
     const query = `
       SELECT 
         COUNT(*) AS total_pacientes,
@@ -88,8 +107,7 @@ app.get('/api/estadisticas/pacientes', async (req, res) => {
   }
 });
 
-// Configuración del puerto
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT} conectado a Aiven`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });

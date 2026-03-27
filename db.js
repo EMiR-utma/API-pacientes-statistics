@@ -1,23 +1,23 @@
+// This is the database code adapted for Aiven PostgreSQL
 require('dotenv').config();
 const { Pool } = require('pg');
 
-// Creamos un "Pool" de conexiones, que es más eficiente para apps en la nube
+// We create a single pool instance that will be shared across the app.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Esto es OBLIGATORIO para que Aiven no te rechace
+    rejectUnauthorized: false // This is often required for cloud databases like Aiven to not be rejected due to SSL issues
   }
 });
 
-// Función para obtener una conexión (mantengo el nombre para que no rompas app.js)
+// Function to get a database connection, in this case we return the pool since it manages connections internally.
+// but we can still have this function for consistency and future flexibility if we want to add connection pooling logic or error handling.
 async function getConnection() {
   try {
-    // En pg, el pool maneja las conexiones automáticamente, 
-    // pero retornamos el pool para que tus consultas sigan funcionando.
     return pool;
   } catch (error) {
     console.error('Error de conexión con Aiven:', error);
   }
 }
-
+// This module exports the getConnection function and the pool instance, so other parts of the app can use them to interact with the database.
 module.exports = { getConnection, pool };
