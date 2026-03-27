@@ -5,9 +5,13 @@ const cors = require('cors');
 const { pool } = require('./db'); 
 
 //  Here we initialize our firebase admin credential, which allow us to interact with Firebase services.
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log("Firebase ha sido inicializado correctamente");
+}
+// We use a "if" to prevent double intialization in case Render restarts the server.
 
 const dbFirebase = admin.firestore();
 
